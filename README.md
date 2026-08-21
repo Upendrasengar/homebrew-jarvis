@@ -1,14 +1,17 @@
 # homebrew-jarvis
 
 Homebrew tap for [Jarvis](https://github.com/upendrasengar/jarvis) — a
-personal AI agent on Claude Code: daily project digests, fully-local call
-recording + minutes, second-brain recall, voice, and a dashboard.
+personal AI agent on Claude Code: daily project digests with attention
+triage, fully-local call recording + minutes, a knowledge graph,
+second-brain recall, voice, Telegram, an optional calendar adapter, and a
+dashboard.
 
 ## Install
 
 ```bash
 brew tap upendrasengar/jarvis
 brew install jarvis
+jarvis init           # short interview: who you are, which repos to watch
 jarvis start          # → http://localhost:4321
 ```
 
