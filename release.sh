@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Jarvis · © 2026 Upendra Sengar · MIT License · https://github.com/Upendrasengar/jarvis
 # release.sh <version> — cut a Jarvis release and point the formula at it.
 # Tags the engine repo, pushes the tag, downloads GitHub's tarball, updates
 # the formula's url+sha256, and commits the tap.
