@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# release.sh <version> — cut a Jarvis release and point the formula at it.
+# Tags the engine repo, pushes the tag, downloads GitHub's tarball, updates
+# the formula's url+sha256, and commits the tap.
+set -euo pipefail
+VERSION="${1:?usage: release.sh <version, e.g. 0.1.0>}"
+TAP_DIR="$(cd "$(dirname "$0")" && pwd)"
+ENGINE_DIR="${JARVIS_ENGINE_DIR:-$TAP_DIR/../jarvis}"
+FORMULA="$TAP_DIR/Formula/jarvis.rb"
+
+cd "$ENGINE_DIR"
+git tag -a "v$VERSION" -m "v$VERSION"
+git push origin "v$VERSION"
+
+URL="https://github.com/upendrasengar/jarvis/archive/refs/tags/v$VERSION.tar.gz"
+echo "fetching $URL for checksum..."
+SHA="$(curl -fsSL "$URL" | shasum -a 256 | cut -d' ' -f1)"
+[ -n "$SHA" ] || { echo "checksum failed"; exit 1; }
+
+sed -i '' \
+  -e "s|^  url \".*\"|  url \"$URL\"|" \
+  -e "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" \
+  "$FORMULA"
+
+cd "$TAP_DIR"
+git add Formula/jarvis.rb
+git commit -m "jarvis $VERSION"
+echo "done — push the tap:  git push"

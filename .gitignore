@@ -1,0 +1,7 @@
+# This tap ships ONLY the formula and release tooling. Anything else —
+# especially anything that smells like user data — never enters git.
+reports/
+*.md.bak
+memory/
+data/
+secrets/
