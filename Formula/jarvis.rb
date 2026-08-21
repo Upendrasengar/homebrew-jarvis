@@ -43,6 +43,7 @@ class Jarvis < Formula
       # overlaid with symlinks so upgrades never touch your data.
       set -u
       export PATH="#{Formula["node@22"].opt_bin}:$PATH"
+      export JARVIS_NODE="#{Formula["node@22"].opt_bin}/node"
       ENGINE="#{opt_libexec}"
       JHOME="${JARVIS_HOME:-$HOME/.jarvis}"
       mkdir -p "$JHOME"
