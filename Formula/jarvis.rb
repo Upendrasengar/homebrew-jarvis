@@ -34,6 +34,28 @@ class Jarvis < Formula
              "-o", "tools/call-capture/bin/audiocap"
       system "swiftc", "-O", "tools/call-capture/miccheck.swift",
              "-o", "tools/call-capture/bin/miccheck"
+      # JarvisAudio.app — recording with its own permission identity
+      appdir = "tools/call-capture/JarvisAudio.app/Contents"
+      mkdir_p "#{appdir}/MacOS"
+      (Pathname.new(appdir)/"Info.plist").write <<~PLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleIdentifier</key><string>com.jarvis.audio</string>
+          <key>CFBundleName</key><string>Jarvis Audio</string>
+          <key>CFBundleDisplayName</key><string>Jarvis Audio</string>
+          <key>CFBundleExecutable</key><string>audiocap</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>LSUIElement</key><true/>
+          <key>NSMicrophoneUsageDescription</key>
+          <string>Jarvis records your side of calls to transcribe them locally.</string>
+        </dict>
+        </plist>
+      PLIST
+      cp "tools/call-capture/bin/audiocap", "#{appdir}/MacOS/audiocap"
+      system "codesign", "--force", "-s", "-", "tools/call-capture/JarvisAudio.app"
     end
 
     (bin/"jarvis").write <<~WRAPPER
@@ -72,6 +94,13 @@ class Jarvis < Formula
       First start downloads a whisper speech model (~150 MB):
         jarvis doctor    # see what else is needed
         jarvis start     # server + call watcher -> http://localhost:4321
+
+      Recording permissions: run `jarvis setup` — it requests Screen
+      Recording + Microphone for "Jarvis Audio" (its own identity; your
+      terminal never needs these grants). After upgrades the grant may
+      need re-toggling (ad-hoc signature changes).
+
+      Auto-start at login: jarvis service install
 
       Your data lives in ~/.jarvis (never touched by upgrades).
       Call recording is OFF by default. When you enable it, obtaining the
