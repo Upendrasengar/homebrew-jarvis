@@ -10,6 +10,7 @@ dashboard.
 
 ```bash
 brew tap upendrasengar/jarvis
+brew trust upendrasengar/jarvis   # newer Homebrew requires trusting third-party taps once
 brew install jarvis
 jarvis init           # short interview: who you are, which repos to watch
 jarvis start          # → http://localhost:4321
