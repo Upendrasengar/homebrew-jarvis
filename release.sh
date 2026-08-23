@@ -10,6 +10,12 @@ ENGINE_DIR="${JARVIS_ENGINE_DIR:-$TAP_DIR/../jarvis}"
 FORMULA="$TAP_DIR/Formula/jarvis.rb"
 
 cd "$ENGINE_DIR"
+BRANCH="$(git branch --show-current)"
+if [ "$BRANCH" != "main" ]; then
+  echo "refusing to release: engine repo is on '$BRANCH', not main" >&2
+  echo "(a worker may have left it on an agent/ branch — git checkout main first)" >&2
+  exit 1
+fi
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
 
