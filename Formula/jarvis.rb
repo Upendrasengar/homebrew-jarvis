@@ -2,8 +2,8 @@
 class Jarvis < Formula
   desc "Personal AI agent on Claude Code: digests, local call notes, recall"
   homepage "https://github.com/upendrasengar/jarvis"
-  url "https://github.com/upendrasengar/jarvis/archive/refs/tags/v0.2.26.tar.gz"
-  sha256 "4f03caf0918d926993eb715bd0c35b50b5a5a456278b37702a02ece3f4a9ce63"
+  url "https://github.com/upendrasengar/jarvis/archive/refs/tags/v0.2.27.tar.gz"
+  sha256 "e410c968249c9babcb1ee6faaff078a237700fb00c6ba382aaafbbfec644d0d6"
   license "MIT"
   head "https://github.com/upendrasengar/jarvis.git", branch: "main"
 
