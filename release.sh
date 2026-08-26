@@ -16,6 +16,11 @@ if [ "$BRANCH" != "main" ]; then
   echo "(a worker may have left it on an agent/ branch — git checkout main first)" >&2
   exit 1
 fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "refusing to release: engine repo has uncommitted changes" >&2
+  echo "(a release must tag exactly what's committed — commit or stash first)" >&2
+  exit 1
+fi
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
 
