@@ -21,6 +21,30 @@ if [ -n "$(git status --porcelain)" ]; then
   echo "(a release must tag exactly what's committed — commit or stash first)" >&2
   exit 1
 fi
+# The tag is cut from HEAD. If main has not been pushed, the tag carries the
+# commits but origin/main still points somewhere older — the branch and the
+# release then disagree about what is current.
+git fetch --quiet origin main || true
+if [ -n "$(git log --oneline origin/main..HEAD 2>/dev/null)" ]; then
+  echo "refusing to release: engine main is ahead of origin/main" >&2
+  echo "(git push origin main first, so the tag and the branch agree)" >&2
+  exit 1
+fi
+
+# The tap must be current BEFORE the formula is rewritten. This script once
+# built a version commit on a 29-commit-stale clone; only the non-fast-forward
+# rejection on push stopped that history from being buried.
+git -C "$TAP_DIR" fetch --quiet origin || true
+if [ -n "$(git -C "$TAP_DIR" status --porcelain)" ]; then
+  echo "refusing to release: tap has uncommitted changes" >&2
+  exit 1
+fi
+if ! git -C "$TAP_DIR" merge --ff-only origin/main >/dev/null 2>&1; then
+  echo "refusing to release: tap cannot fast-forward to origin/main" >&2
+  echo "(it has diverged — reconcile it by hand before releasing)" >&2
+  exit 1
+fi
+
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
 
@@ -29,10 +53,20 @@ echo "fetching $URL for checksum..."
 SHA="$(curl -fsSL "$URL" | shasum -a 256 | cut -d' ' -f1)"
 [ -n "$SHA" ] || { echo "checksum failed"; exit 1; }
 
+# The `version` line is only needed when url is pinned to a commit archive (a
+# tag that had to move), and the url/sha edit does not touch it — that is how
+# 0.3.21 shipped declaring itself 0.3.20. With a real tag url Homebrew reads
+# the version from the tag, so a leftover pin must go.
 sed -i '' \
   -e "s|^  url \".*\"|  url \"$URL\"|" \
   -e "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" \
+  -e '/^  version "/d' \
   "$FORMULA"
+
+if ! grep -q "tags/v$VERSION.tar.gz" "$FORMULA"; then
+  echo "formula url did not update — refusing to commit a formula pointing elsewhere" >&2
+  exit 1
+fi
 
 cd "$TAP_DIR"
 git add Formula/jarvis.rb
