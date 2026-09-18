@@ -7,15 +7,41 @@ class Jarvis < Formula
   license "MIT"
   head "https://github.com/upendrasengar/jarvis.git", branch: "main"
 
-  depends_on :macos
+  depends_on "pnpm" => :build
+  depends_on "pnpm" => :build
   depends_on "ffmpeg"
-  depends_on "node@22"   # better-sqlite3 v11 predates node 26's V8 API
-  depends_on "pnpm"
+  depends_on :macos
+  depends_on "node@22" # better-sqlite3 v11 predates node 26's V8 API
   depends_on "whisper-cpp"
+  # pnpm and swiftc are only needed when building from source. An install that
+  # finds a prebuilt engine for its architecture never invokes either.
+  uses_from_macos "swift" => :build
+
+  # Prebuilt engine, published per architecture. Its filename carries the Node
+  # ABI its native modules were compiled against, because better-sqlite3 loaded
+  # on the wrong ABI fails at dlopen and takes the server with it.
+  resource "engine" do
+    on_arm do
+      url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-arm64-node127.tar.gz"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000" # set at release time
+    end
+  end
 
   def install
     # build AND run against node 22 LTS (matches the engine's tested stack)
-    ENV.prepend_path "PATH", Formula["node@22"].opt_bin
+    ENV.prepend_path "PATH", formula_opt_bin("node@22")
+
+    # A prebuilt engine turns installation into an extract: no pnpm, no Vite,
+    # no swiftc on the user's Mac. Architectures without a published artifact
+    # fall through to the source build below rather than failing — that is what
+    # keeps Intel working while only Apple Silicon is published.
+    if build_prebuilt?
+      resource("engine").stage do
+        libexec.install Dir["jarvis/*"]
+      end
+      write_wrapper
+      return
+    end
 
     # engine lives read-only in the cellar; user data lives in ~/.jarvis
     # (the wrapper below overlays the two with symlinks)
@@ -58,14 +84,39 @@ class Jarvis < Formula
       system "codesign", "--force", "-s", "-", "tools/call-capture/JarvisAudio.app"
     end
 
+    write_wrapper
+  end
+
+  # True when a prebuilt engine exists for this architecture. Anything else
+  # builds from source, so a new platform degrades to "slower install" rather
+  # than "no install".
+  def build_prebuilt?
+    return false if build.head?
+
+    # A published artifact has a 64-character hex checksum. Testing that rather
+    # than a sentinel string means `brew style --fix` cannot quietly rewrite the
+    # placeholder into something that reads as publishable.
+    engine = resource("engine")
+    sum = engine.checksum.to_s
+    engine.url.to_s.include?("releases/download") &&
+      sum.match?(/\A[0-9a-f]{64}\z/) &&
+      # all-zeros is the unpublished placeholder — it is valid hex, so the
+      # shape test alone would send an unreleased formula chasing an artifact
+      # that does not exist yet
+      sum != ("0" * 64)
+  rescue
+    false
+  end
+
+  def write_wrapper
     (bin/"jarvis").write <<~WRAPPER
       #!/bin/bash
       # jarvis — Homebrew wrapper. Engine (read-only) lives in the cellar;
       # everything Jarvis knows about YOU lives in $JARVIS_HOME (~/.jarvis),
       # overlaid with symlinks so upgrades never touch your data.
       set -u
-      export PATH="#{Formula["node@22"].opt_bin}:$PATH"
-      export JARVIS_NODE="#{Formula["node@22"].opt_bin}/node"
+      export PATH="#{formula_opt_bin("node@22")}:$PATH"
+      export JARVIS_NODE="#{formula_opt_bin("node@22")}/node"
       ENGINE="#{opt_libexec}"
       JHOME="${JARVIS_HOME:-$HOME/.jarvis}"
       mkdir -p "$JHOME"
@@ -111,9 +162,56 @@ class Jarvis < Formula
   end
 
   test do
-    # doctor exits non-zero on a fresh machine (model not downloaded yet);
-    # we only assert it runs and reports coherently
-    output = shell_output("#{bin}/jarvis doctor 2>&1", 1)
-    assert_match "Jarvis doctor", output
+    # Everything here runs against a throwaway JARVIS_HOME, so the test can
+    # never touch a real installation's vault, secrets or services.
+    home = testpath/"jarvis-home"
+    ENV["JARVIS_HOME"] = home.to_s
+
+    # 1. Doctor runs and reports coherently. It exits non-zero on a fresh
+    #    machine (no whisper model yet), which is a finding, not a crash.
+    human = shell_output("#{bin}/jarvis doctor 2>&1", 1)
+    assert_match "Jarvis doctor", human
+
+    # 2. The machine-readable form is valid JSON with classified checks —
+    #    this is what the browser onboarding consumes.
+    require "json"
+    report = JSON.parse(shell_output("#{bin}/jarvis doctor --json 2>/dev/null", 1))
+    assert_kind_of Array, report["checks"]
+    refute_empty report["checks"]
+    known = %w[pass warning blocked optional]
+    unknown = report["checks"].reject { |c| known.include?(c["status"]) }
+    assert_empty unknown, "doctor reported a check with an unknown status"
+
+    # 3. The native module loads under the packaged Node. This is the failure
+    #    a prebuilt artifact can silently ship: an ABI mismatch surfaces only
+    #    at dlopen, long after install has reported success.
+    node = formula_opt_bin("node@22")/"node"
+    system node, "-e", <<~JS
+      const db = require("#{opt_libexec}/node_modules/better-sqlite3");
+      new db(":memory:").prepare("select 1 as ok").get();
+    JS
+
+    # 4. The server actually boots and answers. An install that cannot serve
+    #    /api/health is broken no matter how cleanly it unpacked.
+    port = free_port
+    pid = spawn({ "JARVIS_HOME" => home.to_s, "JARVIS_UI_PORT" => port.to_s },
+                "#{bin}/jarvis", "start", out: File::NULL, err: File::NULL)
+    begin
+      healthy = false
+      30.times do
+        sleep 1
+        healthy = system("/usr/bin/curl", "-fsS", "http://127.0.0.1:#{port}/api/health",
+                         out: File::NULL, err: File::NULL)
+        break if healthy
+      end
+      assert healthy, "the server did not answer /api/health within 30s"
+    ensure
+      system "#{bin}/jarvis", "stop", out: File::NULL, err: File::NULL
+      begin
+        Process.kill("TERM", pid)
+      rescue
+        nil
+      end
+    end
   end
 end

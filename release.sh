@@ -48,6 +48,40 @@ fi
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
 
+# ── prebuilt engine ────────────────────────────────────────────────────────
+# Built and attached BEFORE the formula is rewritten, so the tap can never
+# point at an artifact that does not exist. An install then extracts instead of
+# compiling: no pnpm, no Vite, no swiftc on the user's Mac.
+#
+# Only the architecture this release machine IS gets published. Cross-building
+# the native module is not something to guess at, and an architecture with no
+# artifact falls through to the source build rather than failing — which is
+# what keeps Intel working while only Apple Silicon is published.
+ARTIFACT_DIR="$(mktemp -d)"
+echo "building the prebuilt engine..."
+if bash "$ENGINE_DIR/tools/build-artifact.sh" "$ARTIFACT_DIR" >/dev/null 2>&1; then
+  ART="$(ls "$ARTIFACT_DIR"/jarvis-engine-*.tar.gz 2>/dev/null | head -1)"
+  if [ -n "$ART" ]; then
+    ART_SHA="$(shasum -a 256 "$ART" | cut -d' ' -f1)"
+    echo "attaching $(basename "$ART") to the release..."
+    if gh release view "v$VERSION" --repo upendrasengar/jarvis >/dev/null 2>&1; then
+      gh release upload "v$VERSION" "$ART" --clobber --repo upendrasengar/jarvis
+    else
+      gh release create "v$VERSION" "$ART" --repo upendrasengar/jarvis \
+        --title "v$VERSION" --notes "Prebuilt engine for $(basename "$ART" | sed 's/jarvis-engine-//;s/.tar.gz//')."
+    fi
+    # only now is the checksum real; before this the formula carries the
+    # all-zeros placeholder and every install builds from source
+    sed -i '' -e "s|^      sha256 \"[0-9a-f]\{64\}\".*|      sha256 \"$ART_SHA\"|" "$FORMULA"
+    echo "prebuilt engine published (sha $ART_SHA)"
+  else
+    echo "warning: no artifact was produced — this release installs from source" >&2
+  fi
+else
+  echo "warning: artifact build failed — this release installs from source" >&2
+fi
+rm -rf "$ARTIFACT_DIR"
+
 URL="https://github.com/upendrasengar/jarvis/archive/refs/tags/v$VERSION.tar.gz"
 echo "fetching $URL for checksum..."
 SHA="$(curl -fsSL "$URL" | shasum -a 256 | cut -d' ' -f1)"
