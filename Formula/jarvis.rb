@@ -36,11 +36,26 @@ class Jarvis < Formula
     # fall through to the source build below rather than failing — that is what
     # keeps Intel working while only Apple Silicon is published.
     if build_prebuilt?
+      ohai "Installing the prebuilt engine (no compilation needed)"
       resource("engine").stage do
         libexec.install Dir["jarvis/*"]
       end
       write_wrapper
       return
+    end
+
+    # Say WHY this is about to compile. Falling through silently is the same
+    # failure this whole effort exists to remove: an install that quietly does
+    # the slow thing looks identical to one doing the fast thing, until it is
+    # twenty minutes deep in a build log. On an architecture with no published
+    # artifact the fallback is correct — but correct and silent is still a bad
+    # thing to have to diagnose from scrollback.
+    ohai "Building Jarvis from source (this takes a while)"
+    if Hardware::CPU.intel?
+      opoo "No prebuilt engine is published for Intel, only Apple Silicon. " \
+           "This is expected on this Mac, not an error."
+    else
+      opoo "No prebuilt engine matched this machine; falling back to a source build."
     end
 
     # engine lives read-only in the cellar; user data lives in ~/.jarvis
