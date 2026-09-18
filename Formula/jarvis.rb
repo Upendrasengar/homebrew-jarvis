@@ -209,10 +209,14 @@ class Jarvis < Formula
         jarvis doctor    # see what else is needed
         jarvis start     # server + call watcher -> http://localhost:4321
 
-      Recording permissions: run `jarvis setup` — it requests Screen
-      Recording + Microphone for "Jarvis Audio" (its own identity; your
-      terminal never needs these grants). After upgrades the grant may
-      need re-toggling (ad-hoc signature changes).
+      Recording permissions: run `jarvis sign create` once, then
+      `jarvis setup` — the first gives the apps a stable signature, the
+      second requests Screen Recording + Microphone for "Jarvis Audio"
+      (its own identity; your terminal never needs these grants).
+
+      Do the sign step FIRST. Without it the apps are signed ad-hoc,
+      macOS pins the grant to the binary's hash, and every upgrade
+      silently revokes recording. With it, the grant survives.
 
       Auto-start at login: jarvis service install
 
