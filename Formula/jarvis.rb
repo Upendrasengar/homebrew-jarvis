@@ -5,17 +5,35 @@ class Jarvis < Formula
   url "https://github.com/upendrasengar/jarvis/archive/refs/tags/v0.3.27.tar.gz"
   sha256 "73834f0d7ffa0437ad75bac94b414d1cd3bb7b3a503f628b23bd131c780575ef"
   license "MIT"
-  head "https://github.com/upendrasengar/jarvis.git", branch: "main"
 
-  depends_on "pnpm" => :build
-  depends_on "pnpm" => :build
+  head do
+    url "https://github.com/upendrasengar/jarvis.git", branch: "main"
+    depends_on "pnpm" => :build
+  end
+
   depends_on "ffmpeg"
   depends_on :macos
   depends_on "node@22" # better-sqlite3 v11 predates node 26's V8 API
   depends_on "whisper-cpp"
+
   # pnpm and swiftc are only needed when building from source. An install that
-  # finds a prebuilt engine for its architecture never invokes either.
+  # finds a prebuilt engine for its architecture never invokes either — so do
+  # not make it pay for them.
+  #
+  # pnpm was declared unconditionally (and twice), which is expensive in a way
+  # that is invisible from here: on a Mac with no pnpm bottle, Homebrew builds
+  # pnpm from source, which pulls in llvm@22 and rust and builds those too.
+  # Observed on a 2019 Intel MacBook Pro: hours of LLVM, for a dependency an
+  # Apple Silicon install never touches.
+  #
+  # Scope it to the cases that genuinely compile: Intel, which has no
+  # published artifact, and --HEAD, where build_prebuilt? returns false by
+  # design.
   uses_from_macos "swift" => :build
+
+  on_intel do
+    depends_on "pnpm" => :build
+  end
 
   # Prebuilt engine, published per architecture. Its filename carries the Node
   # ABI its native modules were compiled against, because better-sqlite3 loaded
@@ -38,7 +56,19 @@ class Jarvis < Formula
     if build_prebuilt?
       ohai "Installing the prebuilt engine (no compilation needed)"
       resource("engine").stage do
-        libexec.install Dir["jarvis/*"]
+        # Homebrew strips a single leading directory when it stages a resource,
+        # so the archive's top-level "jarvis/" is already gone here and the
+        # tree sits at the CWD. Globbing "jarvis/*" matched nothing, and
+        # `install` on an empty array is only a WARNING — producing a 63 KB
+        # install that reported success with no engine in it.
+        src = File.directory?("jarvis") ? Dir["jarvis/*"] : Dir["*"]
+        odie "prebuilt engine staged empty — the artifact layout changed" if src.empty?
+        libexec.install src
+      end
+      # Check the artifact, not the exit status. Everything above can succeed
+      # while installing nothing, which is exactly what happened.
+      %w[apps/server/src/index.ts node_modules/better-sqlite3 apps/web/dist/index.html].each do |f|
+        odie "prebuilt engine is missing #{f} — refusing a broken install" unless (libexec/f).exist?
       end
       write_wrapper
       return
@@ -50,6 +80,24 @@ class Jarvis < Formula
     # twenty minutes deep in a build log. On an architecture with no published
     # artifact the fallback is correct — but correct and silent is still a bad
     # thing to have to diagnose from scrollback.
+    # pnpm is only declared for Intel and --HEAD, so an Apple Silicon release
+    # install that somehow reaches here has no way to build. That happens if a
+    # release publishes a formula whose artifact upload did not succeed: the
+    # checksum stays a placeholder and build_prebuilt? goes false. Fail with
+    # the actual reason rather than an obscure "pnpm: command not found" forty
+    # lines into a build.
+    if Hardware::CPU.arm? && !build.head?
+      odie <<~MSG
+        No prebuilt engine was found for this release, and the source build is
+        not available on Apple Silicon (pnpm is not installed for it).
+
+        This usually means the release published a formula without its
+        artifact. Please report it, or install the development version:
+
+          brew install --HEAD upendrasengar/jarvis/jarvis
+      MSG
+    end
+
     ohai "Building Jarvis from source (this takes a while)"
     if Hardware::CPU.intel?
       opoo "No prebuilt engine is published for Intel, only Apple Silicon. " \
