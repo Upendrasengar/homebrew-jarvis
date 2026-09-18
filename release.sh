@@ -45,6 +45,28 @@ if ! git -C "$TAP_DIR" merge --ff-only origin/main >/dev/null 2>&1; then
   exit 1
 fi
 
+# ── tests, before anything is published ────────────────────────────────────
+# A release that tags first and tests later has already published the mistake.
+# Everything below runs against the working tree that is about to become the
+# tag, and any failure stops the release with nothing pushed.
+echo "running the test suites..."
+REPORT="$(mktemp)"
+run_gate() {   # $1 = label, rest = command
+  local label="$1"; shift
+  if "$@" >/tmp/jarvis-release-$$.log 2>&1; then
+    echo "  pass  $label" | tee -a "$REPORT"
+  else
+    echo "  FAIL  $label" | tee -a "$REPORT"
+    tail -12 /tmp/jarvis-release-$$.log >&2
+    echo "refusing to release: $label failed" >&2
+    exit 1
+  fi
+}
+run_gate "doctor JSON contract"   bash "$ENGINE_DIR/tools/tests/doctor-json.test.sh"
+run_gate "onboarding state"       node "$ENGINE_DIR/tools/test-onboarding-state.mjs"
+run_gate "onboarding wizard"      bash "$ENGINE_DIR/tools/test-onboard.sh"
+run_gate "public audit"           bash "$ENGINE_DIR/tools/pre-push-audit.sh"
+
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
 
@@ -101,6 +123,47 @@ if ! grep -q "tags/v$VERSION.tar.gz" "$FORMULA"; then
   echo "formula url did not update — refusing to commit a formula pointing elsewhere" >&2
   exit 1
 fi
+
+# ── verify the published artifacts, after tagging ──────────────────────────
+# GitHub caches tag tarballs, and this repo has already shipped a release whose
+# formula pointed at content that was not what had been built. Downloading what
+# was published and checking it is the only way to know.
+echo "verifying published content..."
+VERIFY="$(mktemp -d)"
+curl -fsSL "$URL" -o "$VERIFY/src.tar.gz" || { echo "could not download the published source tarball" >&2; exit 1; }
+DL_SHA="$(shasum -a 256 "$VERIFY/src.tar.gz" | cut -d' ' -f1)"
+[ "$DL_SHA" = "$SHA" ] || { echo "published source checksum does not match the formula" >&2; exit 1; }
+echo "  pass  source tarball matches the formula" | tee -a "$REPORT"
+
+if [ -n "${ART_SHA:-}" ]; then
+  ART_URL="https://github.com/upendrasengar/jarvis/releases/download/v$VERSION/$(basename "$ART")"
+  curl -fsSL "$ART_URL" -o "$VERIFY/engine.tar.gz" \
+    || { echo "the prebuilt engine was not downloadable after publishing" >&2; exit 1; }
+  [ "$(shasum -a 256 "$VERIFY/engine.tar.gz" | cut -d' ' -f1)" = "$ART_SHA" ] \
+    || { echo "published engine checksum does not match what was built" >&2; exit 1; }
+  # and that it is actually an engine, not an empty or truncated upload
+  tar -tzf "$VERIFY/engine.tar.gz" | grep -q '^jarvis/apps/server/src/index.ts$' \
+    || { echo "the published engine does not contain a server" >&2; exit 1; }
+  echo "  pass  prebuilt engine matches and contains a server" | tee -a "$REPORT"
+fi
+rm -rf "$VERIFY"
+
+# ── report ─────────────────────────────────────────────────────────────────
+mkdir -p "$ENGINE_DIR/reports/releases"
+{
+  echo "# Jarvis v$VERSION"
+  echo
+  echo "- commit: $(cd "$ENGINE_DIR" && git rev-parse --short HEAD)"
+  echo "- built:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "- source sha256: $SHA"
+  [ -n "${ART_SHA:-}" ] && echo "- engine: $(basename "$ART") ($ART_SHA)"
+  [ -n "${ART_SHA:-}" ] || echo "- engine: none published — installs build from source"
+  echo
+  echo "## Gates"
+  cat "$REPORT"
+} > "$ENGINE_DIR/reports/releases/v$VERSION.md"
+echo "report: reports/releases/v$VERSION.md"
+rm -f "$REPORT"
 
 cd "$TAP_DIR"
 git add Formula/jarvis.rb
