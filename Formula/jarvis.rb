@@ -209,13 +209,19 @@ class Jarvis < Formula
       ENGINE="#{opt_libexec}"
       JHOME="${JARVIS_HOME:-$HOME/.jarvis}"
       mkdir -p "$JHOME"
+      # runtime belongs here for the same reason artifact.json does: scripts
+      # resolve the interpreter as $JARVIS_DIR/runtime/node, and without the
+      # link that path does not exist on an installed copy. It worked only
+      # because the wrapper also exports JARVIS_NODE — one path happening to
+      # cover for another that was missing.
+      #
       # artifact.json belongs in this list: it records the version, commit and
       # Node ABI of the installed engine, and three things read it from
       # $JARVIS_DIR — services.sh's ABI guard before starting the server,
       # doctor's ABI mismatch check, and the version the dashboard shows.
       # Omitted, all three silently found nothing and reported no problem, on
       # precisely the installs they exist to protect.
-      for item in apps packages tools node_modules package.json artifact.json \\
+      for item in apps packages tools node_modules package.json artifact.json runtime \\
                   pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json \\
                   CLAUDE.md memory.example install.sh jarvis docs LICENSE; do
         ln -sfn "$ENGINE/$item" "$JHOME/$item"
