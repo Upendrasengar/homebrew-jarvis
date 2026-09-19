@@ -42,7 +42,7 @@ class Jarvis < Formula
     end
     on_intel do
       url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-x86_64-node127.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000" # set at release time
+      sha256 "5dae6862cc5cb16b2cd3ca6402b33cff1bf9f83ed13fc7793692dcc30d053a4c"
     end
   end
 
