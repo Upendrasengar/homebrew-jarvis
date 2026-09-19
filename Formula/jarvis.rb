@@ -182,11 +182,15 @@ class Jarvis < Formula
       # everything Jarvis knows about YOU lives in $JARVIS_HOME (~/.jarvis),
       # overlaid with symlinks so upgrades never touch your data.
       set -u
+      # NOTE: this runs BEFORE ENGINE= is assigned below, so it interpolates
+      # the cellar path directly rather than using $ENGINE — under `set -u` a
+      # forward reference kills every invocation of `jarvis`.
+      #
       # The engine ships the interpreter its native modules were built for.
       # Fall back to a Homebrew Node only for a source (--HEAD) install, which
       # has no bundled runtime.
-      if [ -x "$ENGINE/runtime/node" ]; then
-        export JARVIS_NODE="$ENGINE/runtime/node"
+      if [ -x "#{opt_libexec}/runtime/node" ]; then
+        export JARVIS_NODE="#{opt_libexec}/runtime/node"
       elif [ -x "#{formula_opt_bin("node@22")}/node" ]; then
         export PATH="#{formula_opt_bin("node@22")}:$PATH"
         export JARVIS_NODE="#{formula_opt_bin("node@22")}/node"
