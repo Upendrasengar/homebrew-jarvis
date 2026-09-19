@@ -49,7 +49,7 @@ class Jarvis < Formula
   resource "engine" do
     on_arm do
       url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-arm64-node127.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "297b3d8e0375e3a2295103bd1d50865e11d2db4824d55f4aae8819434519d204"
     end
     on_intel do
       url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-x86_64-node127.tar.gz"
