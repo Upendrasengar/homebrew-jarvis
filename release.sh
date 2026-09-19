@@ -70,62 +70,6 @@ run_gate "public audit"           bash "$ENGINE_DIR/tools/pre-push-audit.sh"
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
 
-# ── prebuilt engine ────────────────────────────────────────────────────────
-# Built and attached BEFORE the formula is rewritten, so the tap can never
-# point at an artifact that does not exist. An install then extracts instead of
-# compiling: no pnpm, no Vite, no swiftc on the user's Mac.
-#
-# Only the architecture this release machine IS gets published. Cross-building
-# the native module is not something to guess at, and an architecture with no
-# artifact falls through to the source build rather than failing — which is
-# what keeps Intel working while only Apple Silicon is published.
-ARTIFACT_DIR="$(mktemp -d)"
-echo "building the prebuilt engine..."
-if bash "$ENGINE_DIR/tools/build-artifact.sh" "$ARTIFACT_DIR" >/dev/null 2>&1; then
-  ART="$(ls "$ARTIFACT_DIR"/jarvis-engine-*.tar.gz 2>/dev/null | head -1)"
-  if [ -n "$ART" ]; then
-    ART_SHA="$(shasum -a 256 "$ART" | cut -d' ' -f1)"
-    echo "attaching $(basename "$ART") to the release..."
-    if gh release view "v$VERSION" --repo upendrasengar/jarvis >/dev/null 2>&1; then
-      gh release upload "v$VERSION" "$ART" --clobber --repo upendrasengar/jarvis
-    else
-      gh release create "v$VERSION" "$ART" --repo upendrasengar/jarvis \
-        --title "v$VERSION" --notes "Prebuilt engine for $(basename "$ART" | sed 's/jarvis-engine-//;s/.tar.gz//')."
-    fi
-    # only now is the checksum real; before this the formula carries the
-    # all-zeros placeholder and every install builds from source
-    # Patch ONLY the block for the architecture just built. A blanket sed over
-    # every 64-hex sha256 line would stamp this checksum onto the other
-    # architecture's block too, pointing it at an artifact that is not the one
-    # it names — an install would then fail checksum verification on a release
-    # that looked fine from here.
-    case "$(basename "$ART")" in
-      *arm64*)  ARCH_BLOCK=on_arm ;;
-      *x86_64*) ARCH_BLOCK=on_intel ;;
-      *) echo "cannot tell which architecture $(basename "$ART") is for" >&2; exit 1 ;;
-    esac
-    python3 - "$FORMULA" "$ARCH_BLOCK" "$ART_SHA" <<'PYEOF'
-import re, sys
-path, block, sha = sys.argv[1], sys.argv[2], sys.argv[3]
-src = open(path).read()
-# the sha256 belonging to `<block> do ... end` inside resource "engine"
-pattern = re.compile(r'(' + block + r'\s+do\b.*?sha256\s+")[0-9a-f]{64}(")', re.S)
-new, n = pattern.subn(lambda m: m.group(1) + sha + m.group(2), src, count=1)
-if n != 1:
-    sys.stderr.write(f"could not find a sha256 inside {block} do ... end\n")
-    sys.exit(1)
-open(path, "w").write(new)
-PYEOF
-    [ $? -eq 0 ] || { echo "refusing to release: could not update the $ARCH_BLOCK checksum" >&2; exit 1; }
-    echo "prebuilt engine published (sha $ART_SHA)"
-  else
-    echo "warning: no artifact was produced — this release installs from source" >&2
-  fi
-else
-  echo "warning: artifact build failed — this release installs from source" >&2
-fi
-rm -rf "$ARTIFACT_DIR"
-
 URL="https://github.com/upendrasengar/jarvis/archive/refs/tags/v$VERSION.tar.gz"
 echo "fetching $URL for checksum..."
 SHA="$(curl -fsSL "$URL" | shasum -a 256 | cut -d' ' -f1)"
@@ -157,17 +101,6 @@ DL_SHA="$(shasum -a 256 "$VERIFY/src.tar.gz" | cut -d' ' -f1)"
 [ "$DL_SHA" = "$SHA" ] || { echo "published source checksum does not match the formula" >&2; exit 1; }
 echo "  pass  source tarball matches the formula" | tee -a "$REPORT"
 
-if [ -n "${ART_SHA:-}" ]; then
-  ART_URL="https://github.com/upendrasengar/jarvis/releases/download/v$VERSION/$(basename "$ART")"
-  curl -fsSL "$ART_URL" -o "$VERIFY/engine.tar.gz" \
-    || { echo "the prebuilt engine was not downloadable after publishing" >&2; exit 1; }
-  [ "$(shasum -a 256 "$VERIFY/engine.tar.gz" | cut -d' ' -f1)" = "$ART_SHA" ] \
-    || { echo "published engine checksum does not match what was built" >&2; exit 1; }
-  # and that it is actually an engine, not an empty or truncated upload
-  tar -tzf "$VERIFY/engine.tar.gz" | grep -q '^jarvis/apps/server/src/index.ts$' \
-    || { echo "the published engine does not contain a server" >&2; exit 1; }
-  echo "  pass  prebuilt engine matches and contains a server" | tee -a "$REPORT"
-fi
 rm -rf "$VERIFY"
 
 # ── report ─────────────────────────────────────────────────────────────────
@@ -178,8 +111,7 @@ mkdir -p "$ENGINE_DIR/reports/releases"
   echo "- commit: $(cd "$ENGINE_DIR" && git rev-parse --short HEAD)"
   echo "- built:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "- source sha256: $SHA"
-  [ -n "${ART_SHA:-}" ] && echo "- engine: $(basename "$ART") ($ART_SHA)"
-  [ -n "${ART_SHA:-}" ] || echo "- engine: none published — installs build from source"
+  echo "- engines: published per architecture by tools/release-artifact.sh"
   echo
   echo "## Gates"
   cat "$REPORT"
@@ -189,5 +121,24 @@ rm -f "$REPORT"
 
 cd "$TAP_DIR"
 git add Formula/jarvis.rb
-git commit -m "jarvis $VERSION"
-echo "done — push the tap:  git push"
+git commit --quiet -m "jarvis $VERSION"
+git push --quiet origin main || { echo "could not push the tap" >&2; exit 1; }
+echo "tap updated to $VERSION"
+
+# ── this machine's engine ──────────────────────────────────────────────────
+# One implementation, run once per architecture. It builds from the tag just
+# created, publishes, verifies the PUBLISHED bytes, and points the formula's
+# block for this architecture at them.
+#
+# The other architecture is a second Mac running the same command against the
+# same tag. Until it does, installs there stop with a clear message rather
+# than attempting a source build.
+echo
+bash "$ENGINE_DIR/tools/release-artifact.sh" "$VERSION" || {
+  echo "the engine for $(uname -m) was not published — run tools/release-artifact.sh $VERSION to retry" >&2
+  exit 1
+}
+
+echo
+echo "v$VERSION is out for $(uname -m)."
+echo "On the other Mac:  git fetch --tags && bash tools/release-artifact.sh $VERSION"
