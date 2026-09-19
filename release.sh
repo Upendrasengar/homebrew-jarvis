@@ -85,6 +85,29 @@ sed -i '' \
   -e '/^  version "/d' \
   "$FORMULA"
 
+# Every engine checksum belongs to the PREVIOUS version. The resource urls
+# interpolate the new version, so leaving them would point each architecture at
+# an artifact that does not exist yet, under a checksum for one that does —
+# a 404 during install instead of the clear "not published for this
+# architecture" message the placeholder produces.
+#
+# Reset them all; release-artifact.sh fills in each architecture as it is
+# actually published, this machine's immediately after this script.
+python3 - "$FORMULA" <<'PYEOF'
+import re, sys
+path = sys.argv[1]
+src = open(path).read()
+head, sep, tail = src.partition('resource "engine" do')
+if not sep:
+    sys.stderr.write("no engine resource block found\n"); sys.exit(1)
+tail, n = re.subn(r'(sha256\s+")[0-9a-f]{64}(")', lambda m: m.group(1) + "0" * 64 + m.group(2), tail)
+if n == 0:
+    sys.stderr.write("no engine checksums to reset\n"); sys.exit(1)
+open(path, "w").write(head + sep + tail)
+print(f"  reset {n} engine checksum(s) to the unpublished placeholder")
+PYEOF
+[ $? -eq 0 ] || { echo "refusing to release: could not reset the engine checksums" >&2; exit 1; }
+
 if ! grep -q "tags/v$VERSION.tar.gz" "$FORMULA"; then
   echo "formula url did not update — refusing to commit a formula pointing elsewhere" >&2
   exit 1
