@@ -6,34 +6,31 @@ class Jarvis < Formula
   sha256 "d78c5fbf9d2cffde50fc8f97d37cd224098b5b328aa70e60e207bdfcec4c846f"
   license "MIT"
 
+  # Node and pnpm are BUILD-only now. The published engine carries the exact
+  # interpreter its native modules were compiled against (runtime/node), so a
+  # prebuilt install needs no Node from Homebrew at all.
+  #
+  # That is not a tidiness win, it is the difference between installable and
+  # not. Homebrew publishes no macOS Intel bottles for node@22, pnpm, llvm@22
+  # or rust, so an Intel machine compiled all four from source — Node, then
+  # LLVM (167 MB of source) and Rust (529 MB) purely to build pnpm. Observed on
+  # a 2019 quad-core i5: most of a day, if it finished at all.
+  #
+  # It also ends the ABI problem structurally rather than by convention.
+  # better-sqlite3 loaded on the wrong Node fails at dlopen and takes the
+  # server with it; shipping the matching runtime makes the mismatch
+  # impossible instead of something a settings file must keep getting right.
   head do
     url "https://github.com/upendrasengar/jarvis.git", branch: "main"
     depends_on "pnpm" => :build
+    depends_on "node@22" # better-sqlite3 v11 predates node 26's V8 API
   end
 
   depends_on "ffmpeg"
   depends_on :macos
-  depends_on "node@22" # better-sqlite3 v11 predates node 26's V8 API
   depends_on "whisper-cpp"
 
-  # pnpm and swiftc are only needed when building from source. An install that
-  # finds a prebuilt engine for its architecture never invokes either — so do
-  # not make it pay for them.
-  #
-  # pnpm was declared unconditionally (and twice), which is expensive in a way
-  # that is invisible from here: on a Mac with no pnpm bottle, Homebrew builds
-  # pnpm from source, which pulls in llvm@22 and rust and builds those too.
-  # Observed on a 2019 Intel MacBook Pro: hours of LLVM, for a dependency an
-  # Apple Silicon install never touches.
-  #
-  # Scope it to the cases that genuinely compile: Intel, which has no
-  # published artifact, and --HEAD, where build_prebuilt? returns false by
-  # design.
   uses_from_macos "swift" => :build
-
-  on_intel do
-    depends_on "pnpm" => :build
-  end
 
   # Prebuilt engine, published per architecture. Its filename carries the Node
   # ABI its native modules were compiled against, because better-sqlite3 loaded
@@ -43,11 +40,17 @@ class Jarvis < Formula
       url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-arm64-node127.tar.gz"
       sha256 "9b3401c5188338b40f1575ab45383a2e716ea104ab25a4f595164aa6ceafc675"
     end
+    on_intel do
+      url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-x86_64-node127.tar.gz"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000" # set at release time
+    end
   end
 
   def install
     # build AND run against node 22 LTS (matches the engine's tested stack)
-    ENV.prepend_path "PATH", formula_opt_bin("node@22")
+    # Only the source build needs a Homebrew Node; a prebuilt install brings
+    # its own and this path never applies.
+    ENV.prepend_path "PATH", formula_opt_bin("node@22") if build.head?
 
     # A prebuilt engine turns installation into an extract: no pnpm, no Vite,
     # no swiftc on the user's Mac. Architectures without a published artifact
@@ -86,10 +89,11 @@ class Jarvis < Formula
     # checksum stays a placeholder and build_prebuilt? goes false. Fail with
     # the actual reason rather than an obscure "pnpm: command not found" forty
     # lines into a build.
-    if Hardware::CPU.arm? && !build.head?
+    unless build.head?
       odie <<~MSG
-        No prebuilt engine was found for this release, and the source build is
-        not available on Apple Silicon (pnpm is not installed for it).
+        No prebuilt engine was published for this release and this
+        architecture, and the source build is not available (Node and pnpm are
+        declared only for --HEAD).
 
         This usually means the release published a formula without its
         artifact. Please report it, or install the development version:
@@ -178,8 +182,15 @@ class Jarvis < Formula
       # everything Jarvis knows about YOU lives in $JARVIS_HOME (~/.jarvis),
       # overlaid with symlinks so upgrades never touch your data.
       set -u
-      export PATH="#{formula_opt_bin("node@22")}:$PATH"
-      export JARVIS_NODE="#{formula_opt_bin("node@22")}/node"
+      # The engine ships the interpreter its native modules were built for.
+      # Fall back to a Homebrew Node only for a source (--HEAD) install, which
+      # has no bundled runtime.
+      if [ -x "$ENGINE/runtime/node" ]; then
+        export JARVIS_NODE="$ENGINE/runtime/node"
+      elif [ -x "#{formula_opt_bin("node@22")}/node" ]; then
+        export PATH="#{formula_opt_bin("node@22")}:$PATH"
+        export JARVIS_NODE="#{formula_opt_bin("node@22")}/node"
+      fi
       ENGINE="#{opt_libexec}"
       JHOME="${JARVIS_HOME:-$HOME/.jarvis}"
       mkdir -p "$JHOME"
@@ -252,7 +263,9 @@ class Jarvis < Formula
     # 3. The native module loads under the packaged Node. This is the failure
     #    a prebuilt artifact can silently ship: an ABI mismatch surfaces only
     #    at dlopen, long after install has reported success.
-    node = formula_opt_bin("node@22")/"node"
+    # Test what ships: the bundled runtime when there is one, since that is
+    # what every prebuilt install will load better-sqlite3 with.
+    node = (opt_libexec/"runtime/node").exist? ? opt_libexec/"runtime/node" : formula_opt_bin("node@22")/"node"
     system node, "-e", <<~JS
       const db = require("#{opt_libexec}/node_modules/better-sqlite3");
       new db(":memory:").prepare("select 1 as ok").get();

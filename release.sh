@@ -94,7 +94,29 @@ if bash "$ENGINE_DIR/tools/build-artifact.sh" "$ARTIFACT_DIR" >/dev/null 2>&1; t
     fi
     # only now is the checksum real; before this the formula carries the
     # all-zeros placeholder and every install builds from source
-    sed -i '' -e "s|^      sha256 \"[0-9a-f]\{64\}\".*|      sha256 \"$ART_SHA\"|" "$FORMULA"
+    # Patch ONLY the block for the architecture just built. A blanket sed over
+    # every 64-hex sha256 line would stamp this checksum onto the other
+    # architecture's block too, pointing it at an artifact that is not the one
+    # it names — an install would then fail checksum verification on a release
+    # that looked fine from here.
+    case "$(basename "$ART")" in
+      *arm64*)  ARCH_BLOCK=on_arm ;;
+      *x86_64*) ARCH_BLOCK=on_intel ;;
+      *) echo "cannot tell which architecture $(basename "$ART") is for" >&2; exit 1 ;;
+    esac
+    python3 - "$FORMULA" "$ARCH_BLOCK" "$ART_SHA" <<'PYEOF'
+import re, sys
+path, block, sha = sys.argv[1], sys.argv[2], sys.argv[3]
+src = open(path).read()
+# the sha256 belonging to `<block> do ... end` inside resource "engine"
+pattern = re.compile(r'(' + block + r'\s+do\b.*?sha256\s+")[0-9a-f]{64}(")', re.S)
+new, n = pattern.subn(lambda m: m.group(1) + sha + m.group(2), src, count=1)
+if n != 1:
+    sys.stderr.write(f"could not find a sha256 inside {block} do ... end\n")
+    sys.exit(1)
+open(path, "w").write(new)
+PYEOF
+    [ $? -eq 0 ] || { echo "refusing to release: could not update the $ARCH_BLOCK checksum" >&2; exit 1; }
     echo "prebuilt engine published (sha $ART_SHA)"
   else
     echo "warning: no artifact was produced — this release installs from source" >&2
