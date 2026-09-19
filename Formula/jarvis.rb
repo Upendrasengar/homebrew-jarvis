@@ -209,7 +209,13 @@ class Jarvis < Formula
       ENGINE="#{opt_libexec}"
       JHOME="${JARVIS_HOME:-$HOME/.jarvis}"
       mkdir -p "$JHOME"
-      for item in apps packages tools node_modules package.json \\
+      # artifact.json belongs in this list: it records the version, commit and
+      # Node ABI of the installed engine, and three things read it from
+      # $JARVIS_DIR — services.sh's ABI guard before starting the server,
+      # doctor's ABI mismatch check, and the version the dashboard shows.
+      # Omitted, all three silently found nothing and reported no problem, on
+      # precisely the installs they exist to protect.
+      for item in apps packages tools node_modules package.json artifact.json \\
                   pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json \\
                   CLAUDE.md memory.example install.sh jarvis docs LICENSE; do
         ln -sfn "$ENGINE/$item" "$JHOME/$item"
