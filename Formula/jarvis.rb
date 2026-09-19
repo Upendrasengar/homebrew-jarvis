@@ -26,9 +26,20 @@ class Jarvis < Formula
     depends_on "node@22" # better-sqlite3 v11 predates node 26's V8 API
   end
 
-  depends_on "ffmpeg"
   depends_on :macos
-  depends_on "whisper-cpp"
+
+  # ffmpeg and whisper-cpp are NOT dependencies, deliberately.
+  #
+  # Nothing outside call recording and voice touches either — chat, notes, the
+  # digest and the brain never invoke them, and call recording is off by
+  # default. Requiring them made every install pay for a feature it might
+  # never use, which on Intel is not a small tax: Homebrew publishes no macOS
+  # Intel bottles for ffmpeg, whisper.cpp, llama.cpp or ggml, so all four are
+  # compiled from source before Jarvis can start for the first time.
+  #
+  # Doctor already reports them under "meetings (optional)" with the exact
+  # command to install them, so the capability is one `brew install` away at
+  # the moment someone actually wants it.
 
   uses_from_macos "swift" => :build
 
@@ -215,31 +226,29 @@ class Jarvis < Formula
     WRAPPER
   end
 
+  # Two lines a person will actually read, then one command that does the
+  # rest. The previous version listed six commands across twenty-five lines
+  # with no indication of which to run first, buried the prerequisite
+  # (Claude Code) in the middle, and explained WHY signing matters before
+  # saying what to type. `jarvis onboard` already checks every prerequisite,
+  # installs what it can, and explains what it cannot — so point at it and
+  # stop reprinting its job here.
   def caveats
     <<~EOS
-      Jarvis needs Claude Code (its brain) installed and logged in:
-        https://claude.com/claude-code   — then run: claude
+      Next step:
 
-      First start downloads a whisper speech model (~150 MB):
-        jarvis doctor    # see what else is needed
-        jarvis start     # server + call watcher -> http://localhost:4321
+        jarvis onboard     guided setup — checks everything, fixes what it can
+        jarvis help        every command, grouped
 
-      Recording permissions: run `jarvis sign create` once, then
-      `jarvis setup` — the first gives the apps a stable signature, the
-      second requests Screen Recording + Microphone for "Jarvis Audio"
-      (its own identity; your terminal never needs these grants).
+      Jarvis thinks with Claude Code, so install and sign in to that first:
+        https://claude.com/claude-code
 
-      Do the sign step FIRST. Without it the apps are signed ad-hoc,
-      macOS pins the grant to the binary's hash, and every upgrade
-      silently revokes recording. With it, the grant survives.
+      Call recording needs two extra tools, installed only if you want it:
+        brew install ffmpeg whisper.cpp
 
-      Auto-start at login: jarvis service install
-
-      Your data lives in ~/.jarvis (never touched by upgrades).
-      Call recording is OFF by default. When you enable it, obtaining the
-      other participants' consent is your responsibility — recording is not
-      announced to them, and recording laws vary by jurisdiction.
-      Grant Microphone + Screen Recording permission when macOS prompts.
+      Your data lives in ~/.jarvis and is never touched by upgrades.
+      Recording is OFF by default. It is not announced to other participants,
+      consent is your responsibility, and the law varies by jurisdiction.
     EOS
   end
 
