@@ -2,8 +2,8 @@
 class Jarvis < Formula
   desc "Personal AI agent on Claude Code: digests, local call notes, recall"
   homepage "https://github.com/upendrasengar/jarvis"
-  url "https://github.com/upendrasengar/jarvis/archive/refs/tags/v0.4.0.tar.gz"
-  sha256 "144fde4116e45b3bce0100639c9999c59e15aacbd232474abc34ee352f5b8761"
+  url "https://github.com/upendrasengar/jarvis/archive/refs/tags/v0.5.0.tar.gz"
+  sha256 "639dad0479c22797f43a054febc40358a1e81ac2677a531e5db532d5606ad846"
   license "MIT"
 
   # Node and pnpm are BUILD-only now. The published engine carries the exact
@@ -49,11 +49,11 @@ class Jarvis < Formula
   resource "engine" do
     on_arm do
       url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-arm64-node127.tar.gz"
-      sha256 "974d965fdf0924a4801dbadeb41d35f41006769543ba5a80e6107e5a95ad67c5"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     on_intel do
       url "https://github.com/upendrasengar/jarvis/releases/download/v#{Jarvis.version}/jarvis-engine-x86_64-node127.tar.gz"
-      sha256 "5fe81f16ef625ebad7c4454f9204b7ab75a6e604e4d73f5b204903fd1f40a870"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
 
